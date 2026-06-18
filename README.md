@@ -77,355 +77,66 @@ typedef struct s_malloc_manager
 
 ## 📚 Fonctions principales
 
-### 1. **malloc(size_t size)** - Allocation mémoire
+Consultez les **commentaires Javadoc détaillés** dans les fichiers source pour comprendre le fonctionnement exact de chaque fonction :
 
-**Description :** Alloue un bloc de mémoire de `size` bytes et retourne un pointeur vers celui-ci.
+### `malloc(size_t size)` - Allocation mémoire
+**Fichier :** `malloc.c` (ligne ~200)
 
-**Prototype :**
-```c
-/**
- * malloc - Alloue dynamiquement de la mémoire
- * @size: Nombre de bytes à allouer
- * 
- * Description:
- *   - Retourne un pointeur vers un bloc de mémoire alloué de taille >= size
- *   - La mémoire n'est pas initialisée (contient des données aléatoires)
- *   - Utilise une stratégie à trois niveaux (TINY, SMALL, LARGE)
- *   - Thread-safe grâce à un mutex
- *   - Prévient les appels récursifs avec un buffer d'urgence
- * 
- * Retourne:
- *   - Pointeur vers la mémoire alloué si succès
- *   - NULL si échec ou size == 0
- * 
- * Cas d'utilisation:
- *   int *array = malloc(10 * sizeof(int));
- */
-void *malloc(size_t size);
-```
+Alloue un bloc de mémoire et retourne un pointeur. Utilise la stratégie à trois niveaux (TINY, SMALL, LARGE).
 
-**Fonctionnement pas à pas :**
+**Prototypes des fonctions utilitaires :**
+- `allocate_from_zone()` - Alloue depuis zones TINY/SMALL
+- `allocate_large()` - Alloue directement via mmap pour LARGE
+- `create_zone()` - Crée une nouvelle zone
+- `find_free_block()` - Cherche un bloc libre
+- `split_block()` - Fragmente un bloc
 
-```
-1. Vérifier que size > 0, sinon retourner NULL
-2. Acquérir le mutex (thread-safety)
-3. Déterminer le type d'allocation selon la taille:
-   ├─ Si size ≤ 128 (TINY):
-   │  └─ Chercher un bloc libre dans les zones TINY
-   │     ├─ Si trouvé: utiliser ce bloc
-   │     └─ Si pas trouvé: créer une nouvelle zone TINY
-   │
-   ├─ Si 128 < size ≤ 1024 (SMALL):
-   │  └─ Chercher un bloc libre dans les zones SMALL
-   │     ├─ Si trouvé: utiliser ce bloc
-   │     └─ Si pas trouvé: créer une nouvelle zone SMALL
-   │
-   └─ Si size > 1024 (LARGE):
-      └─ Allouer directement avec mmap()
-4. Fragmenter le bloc si nécessaire
-5. Marquer le bloc comme utilisé
-6. Libérer le mutex
-7. Retourner le pointeur vers la mémoire utilisable
-```
+### `free(void *ptr)` - Libération mémoire
+**Fichier :** `free.c` (ligne ~82)
 
-**Exemple :**
-```c
-// Allocation TINY
-char *buffer = malloc(64);        // Alloué dans une zone TINY
+Libère le bloc de mémoire pointé par `ptr`. 
+- TINY/SMALL : bloc marqué comme libre, réutilisable
+- LARGE : bloc démappé immédiatement via munmap
 
-// Allocation SMALL
-int *data = malloc(512);          // Alloué dans une zone SMALL
+**Prototypes des fonctions utilitaires :**
+- `free_zone_block()` - Libère un bloc dans une zone
+- `free_large_block()` - Démapple un bloc LARGE
+- `is_in_zone()` - Vérifie si un pointeur est dans une zone
+- `coalesce_blocks()` - Fusionne les blocs libres adjacents
 
-// Allocation LARGE
-double *big = malloc(10000);      // Alloué avec mmap()
+### `realloc(void *ptr, size_t size)` - Réallocation mémoire
+**Fichier :** `realloc.c` (ligne ~4)
 
-// Accès à la mémoire
-buffer[0] = 'A';
-data[0] = 42;
-free(buffer);
-free(data);
-free(big);
-```
+Redimensionne un bloc de mémoire. Peut déplacer la mémoire si nécessaire.
 
----
+**Cas spéciaux :**
+- `ptr == NULL` → agit comme `malloc(size)`
+- `size == 0` → agit comme `free(ptr)`, retourne NULL
+- `size <= bloc actuel` → retourne le même pointeur (optimisation)
 
-### 2. **free(void *ptr)** - Libération mémoire
+### `calloc(size_t nmemb, size_t size)` - Allocation avec initialisation
+**Fichier :** `calloc.c` (ligne ~5)
 
-**Description :** Libère le bloc de mémoire pointé par `ptr` et le rend disponible pour futurs allocations.
+Alloue de la mémoire pour un tableau et initialise tout à zéro.
 
-**Prototype :**
-```c
-/**
- * free - Libère la mémoire allouée par malloc
- * @ptr: Pointeur vers la mémoire à libérer
- * 
- * Description:
- *   - Marque le bloc comme libre (TINY/SMALL) ou le démapple (LARGE)
- *   - Gère les blocs dans les trois catégories (TINY, SMALL, LARGE)
- *   - Thread-safe grâce au mutex
- *   - Ne fait rien si ptr == NULL (comportement standard)
- *   - Les blocs libres dans zones TINY/SMALL peuvent être réutilisés
- * 
- * Paramètres:
- *   - Si ptr est NULL: fonction retourne sans effet
- *   - Si ptr provient de malloc(): bloc marqué libre ou demap
- *   - Si ptr invalide: comportement indéfini
- * 
- * Cas d'utilisation:
- *   int *ptr = malloc(100);
- *   free(ptr);
- *   ptr = NULL;  // Bonne pratique
- */
-void free(void *ptr);
-```
-
-**Fonctionnement pas à pas :**
-
-```
-1. Vérifier si ptr == NULL, si oui retourner
-2. Acquérir le mutex (thread-safety)
-3. Identifier où est alloué le bloc:
-   ├─ Si dans une zone TINY:
-   │  └─ Marquer le bloc comme libre
-   │     └─ Déclencher une coalesce pour fusionner les blocs libres adjacents
-   │
-   ├─ Si dans une zone SMALL:
-   │  └─ Marquer le bloc comme libre
-   │     └─ Déclencher une coalesce pour fusionner les blocs libres adjacents
-   │
-   └─ Si dans les blocs LARGE:
-      ├─ Retirer le bloc de la liste chaînée
-      └─ Appeler munmap() pour libérer les pages mémoire au OS
-4. Libérer le mutex
-```
-
-**Exemple :**
-```c
-int *data = malloc(256);
-data[0] = 42;
-printf("%d\n", data[0]);  // Affiche: 42
-
-free(data);               // Libère la mémoire
-data = NULL;              // Bonne pratique
-// data[0] = 42;          // ❌ UNDEFINED BEHAVIOR après free!
-```
-
-**Spécificités TINY/SMALL vs LARGE :**
-
-| Type | Libération | Réutilisation |
-|------|-----------|---------------|
-| **TINY/SMALL** | Bloc marqué comme libre | Réutilisable par les futures allocations dans la zone |
-| **LARGE** | Démappé immédiatement (munmap) | Retourné au système d'exploitation |
-
----
-
-### 3. **realloc(void *ptr, size_t size)** - Réallocation mémoire
-
-**Description :** Redimensionne un bloc de mémoire existant. Peut déplacer la mémoire si nécessaire.
-
-**Prototype :**
-```c
-/**
- * realloc - Redimensionne un bloc de mémoire alloué
- * @ptr: Pointeur vers le bloc à redimensionner
- * @size: Nouvelle taille souhaitée en bytes
- * 
- * Description:
- *   - Redimensionne la mémoire allouée par malloc/calloc/realloc
- *   - Copie les données existantes vers le nouveau bloc
- *   - Cas spéciaux:
- *     * Si ptr == NULL: agit comme malloc(size)
- *     * Si size == 0: agit comme free(ptr) et retourne NULL
- *     * Si size <= bloc actuel: retourne le même pointeur
- *     * Si size > bloc actuel: alloue un nouveau bloc
- *   - Données existantes: conservées (min(ancienne_size, nouvelle_size))
- * 
- * Retourne:
- *   - Pointeur vers le bloc redimensionné
- *   - NULL si erreur ou size == 0
- *   - Peut être différent du pointeur original
- * 
- * Cas d'utilisation:
- *   int *arr = malloc(10 * sizeof(int));
- *   arr = realloc(arr, 20 * sizeof(int));  // Passer le pointeur!
- */
-void *realloc(void *ptr, size_t size);
-```
-
-**Fonctionnement pas à pas :**
-
-```
-1. Cas spéciaux:
-   ├─ Si ptr == NULL:
-   │  └─ Appeler malloc(size) et retourner
-   │
-   └─ Si size == 0:
-      ├─ Appeler free(ptr)
-      └─ Retourner NULL
-
-2. Récupérer l'en-tête du bloc original (get_block_header)
-
-3. Vérifier si optimisation possible:
-   └─ Si bloc actuel.size >= size demandée:
-      └─ Retourner le même pointeur (pas de déplacement)
-
-4. Sinon: allocation et copie
-   ├─ Allouer un nouveau bloc (malloc(size))
-   ├─ Copier les données:
-   │  └─ memcpy(nouveau, ancien, min(ancienne_size, nouvelle_size))
-   ├─ Libérer l'ancien bloc (free(ptr))
-   └─ Retourner le nouveau pointeur
-```
-
-**Exemple :**
-```c
-// Allocation initiale
-int *arr = malloc(10 * sizeof(int));
-arr[0] = 42;
-
-// Agrandissement
-arr = realloc(arr, 20 * sizeof(int));
-printf("%d\n", arr[0]);  // Affiche: 42 (données préservées)
-arr[15] = 100;
-
-// Réduction
-arr = realloc(arr, 5 * sizeof(int));
-
-// Cas spéciaux
-int *p1 = realloc(NULL, 100);  // Équivalent à malloc(100)
-int *p2 = realloc(p1, 0);      // Équivalent à free(p1), retourne NULL
-
-free(arr);
-```
-
-**Attention :** 
-```c
-// ❌ MAUVAIS - Variable non mise à jour
-int *ptr = malloc(10);
-realloc(ptr, 20);  // Le pointeur a peut-être changé!
-
-// ✅ BON - Mettre à jour le pointeur
-int *ptr = malloc(10);
-ptr = realloc(ptr, 20);  // Assignation obligatoire
-```
-
----
-
-### 4. **calloc(size_t nmemb, size_t size)** - Allocation avec initialisation
-
-**Description :** Alloue de la mémoire pour un tableau et initialise tout à zéro.
-
-**Prototype :**
-```c
-/**
- * calloc - Alloue de la mémoire et l'initialise à zéro
- * @nmemb: Nombre d'éléments
- * @size: Taille de chaque élément en bytes
- * 
- * Description:
- *   - Alloue nmemb * size bytes
- *   - Initialise TOUS les bytes à 0x00
- *   - Vérifie le débordement (nmemb * size > SIZE_MAX)
- *   - Useful pour les structures à initialiser (listes, arbres, etc.)
- * 
- * Retourne:
- *   - Pointeur vers la mémoire allouée et initialisée
- *   - NULL si:
- *     * nmemb == 0 ou size == 0
- *     * Débordement multiplicatif (nmemb * size > SIZE_MAX)
- *     * malloc a échoué
- * 
- * Cas d'utilisation:
- *   int *arr = calloc(10, sizeof(int));  // 40 bytes à zéro
- *   struct Node *nodes = calloc(5, sizeof(struct Node));
- */
-void *calloc(size_t nmemb, size_t size);
-```
-
-**Fonctionnement pas à pas :**
-
-```
-1. Vérifier les paramètres
-   ├─ Si nmemb == 0 ou size == 0:
-   │  └─ Retourner NULL
-   │
-   └─ Vérifier débordement:
-      ├─ Si nmemb > SIZE_MAX / size:
-      │  └─ Débordement détecté!
-      │     └─ Retourner NULL
-      └─ Sinon: calculer total_size = nmemb * size
-
-2. Allouer la mémoire
-   └─ Appeler malloc(total_size)
-
-3. Initialiser à zéro
-   └─ Si allocation réussie:
-      └─ memset(ptr, 0, total_size)
-
-4. Retourner le pointeur alloué et initialisé
-```
-
-**Exemple :**
-```c
-// Allocation de tableau
-int *arr = calloc(10, sizeof(int));
-printf("%d\n", arr[0]);           // Affiche: 0 (initialisé)
-
-// Allocation de structures
-struct Point {
-    int x;
-    int y;
-};
-struct Point *points = calloc(5, sizeof(struct Point));
-printf("%d\n", points[0].x);      // Affiche: 0 (tous les champs à 0)
-
-// Vs malloc
-int *arr1 = malloc(10 * sizeof(int));
-printf("%d\n", arr1[0]);          // Affiche: ??? (aléatoire)
-
-int *arr2 = calloc(10, sizeof(int));
-printf("%d\n", arr2[0]);          // Affiche: 0 (garanti)
-
-free(arr);
-free(points);
-free(arr1);
-free(arr2);
-```
+**Vérifie le débordement :** `if (nmemb > SIZE_MAX / size) return NULL`
 
 ---
 
 ## 🔧 Fonctions utilitaires
 
-### `get_block_header(void *ptr)` - Récupère l'en-tête du bloc
-```c
-/**
- * Récupère la métadonnée d'un bloc alloué
- * Le pointeur utilisable pointe juste après l'en-tête
- * En-tête: [t_block metadata] <- size, is_free, next, prev
- * Pointeur: utilisable à partir d'ici ->
- */
-t_block *header = get_block_header(ptr);
-printf("Taille: %zu bytes\n", header->size);
-printf("Libre: %d\n", header->is_free);
-```
-
-### `create_zone(size_t zone_size)` - Crée une nouvelle zone
-Utilise `mmap()` pour mapper une région de mémoire physique à une zone virtuelle, puis initialise le premier bloc comme libre.
-
-### `find_free_block(t_zone *zone, size_t size)` - Cherche un bloc libre
-Parcourt la chaîne de zones et retourne le premier bloc libre pouvant contenir `size` bytes.
-
-### `allocate_from_zone(...)` - Allocation depuis une zone
-Alloue depuis les zones TINY/SMALL: cherche un bloc libre, en crée une zone si nécessaire, fragmente si possible.
-
-### `allocate_large(size_t size)` - Allocation directe mmap
-Alloue un bloc LARGE via `mmap()` et l'ajoute à la liste des blocs LARGE.
-
-### `coalesce_blocks(t_zone *zone)` - Fusion de blocs libres
-Fusionne les blocs libres adjacents pour réduire la fragmentation:
-```
-Avant:  [Bloc libre 64B] [Bloc libre 64B] -> Après: [Bloc libre 128B]
-```
+| Fonction | Fichier | Description |
+|----------|---------|-------------|
+| `get_block_header()` | malloc.c | Récupère l'en-tête du bloc |
+| `create_zone()` | malloc.c | Crée une nouvelle zone mappée |
+| `find_free_block()` | malloc.c | Cherche un bloc libre suffisant |
+| `allocate_from_zone()` | malloc.c | Alloue depuis zones TINY/SMALL |
+| `allocate_large()` | malloc.c | Alloue un bloc LARGE via mmap |
+| `split_block()` | malloc.c | Fragmente un bloc en deux |
+| `coalesce_blocks()` | free.c | Fusionne blocs libres adjacents |
+| `is_in_zone()` | free.c | Vérifie si pointeur dans zone |
+| `free_zone_block()` | free.c | Libère bloc TINY/SMALL |
+| `free_large_block()` | free.c | Démapple bloc LARGE |
 
 ---
 
@@ -449,8 +160,8 @@ gcc -c calloc.c -o calloc.o
 ar rcs libft_malloc.a malloc.o free.o realloc.o calloc.o
 
 # Ou créer une library dynamique
-gcc -shared -fPIC -c malloc.c free.c realloc.c calloc.c
-gcc -shared -o libft_malloc.so malloc.o free.o realloc.o calloc.o
+gcc -shared -fPIC malloc.c free.c realloc.c calloc.c \
+  -o libft_malloc.so -lpthread
 ```
 
 ---
@@ -476,12 +187,13 @@ int main(void)
 {
     // malloc - allocation simple
     int *arr = malloc(10 * sizeof(int));
+    if (!arr) return -1;
     arr[0] = 42;
     printf("arr[0] = %d\n", arr[0]);
     
     // calloc - allocation avec initialisation
     char *buffer = calloc(256, sizeof(char));
-    printf("buffer[0] = %c (vide)\n", buffer[0]);
+    printf("buffer[0] = %d (zéro)\n", buffer[0]);
     
     // realloc - redimensionnement
     arr = realloc(arr, 20 * sizeof(int));
@@ -501,7 +213,9 @@ int main(void)
 
 L'allocateur est **thread-safe** grâce à un mutex (`pthread_mutex_t`) qui protège toutes les opérations critiques. Chaque thread peut appeler `malloc()`, `free()`, etc. sans risque de corruption mémoire.
 
-## 🏁 Résumé des stratégies
+---
+
+## 📊 Résumé des stratégies
 
 | Opération | TINY (<= 128B) | SMALL (129-1024B) | LARGE (> 1024B) |
 |-----------|----------------|------------------|-----------------|
@@ -509,6 +223,18 @@ L'allocateur est **thread-safe** grâce à un mutex (`pthread_mutex_t`) qui prot
 | Réutilisation | Blocs libres | Blocs libres | Non (munmap) |
 | Fragmentation | Minimale | Minimale | Aucune |
 | Coalesce | Lazy | Lazy | N/A |
+
+---
+
+## 📖 Documentation détaillée
+
+Pour une compréhension approfondie du fonctionnement de chaque fonction, consultez les **commentaires Javadoc** directement dans les fichiers source :
+
+- 📄 `malloc.c` : Fonctions d'allocation
+- 📄 `free.c` : Fonctions de libération
+- 📄 `realloc.c` : Fonction de réallocation
+- 📄 `calloc.c` : Fonction d'allocation initialisée
+- 📄 `malloc.h` : Structures et prototypes
 
 ---
 
