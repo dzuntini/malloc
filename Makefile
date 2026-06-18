@@ -28,8 +28,7 @@ CFLAGS		=	-Wall -Werror -Wextra -I. -fPIC -pthread
 SRCS	=	malloc.c	\
 			free.c		\
 			calloc.c	\
-			realloc.c	\
-			utils.c
+			realloc.c
 
 OBJS =		$(SRCS:.c=.o)
 

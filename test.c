@@ -16,20 +16,21 @@
 
 int main(void)
 {
-	printf("=== Tests unitaires malloc ===\n");
+	ft_printf("=== Tests unitaires malloc ===\n");
 	
-	 void *ptr1 = malloc(10);
+	void *ptr1 = malloc(10);
     void *ptr2 = malloc(20);
     void *ptr3 = malloc(30);
 
-    printf("Allocated memory at: %p\n", ptr1);
-    printf("Allocated memory at: %p\n", ptr2);
-    printf("Allocated memory at: %p\n", ptr3);
+	puts("toto");
+    ft_printf("Allocated memory at: %p\n", ptr1);
+    ft_printf("Allocated memory at: %p\n", ptr2);
+    ft_printf("Allocated memory at: %p\n", ptr3);
 
     free(ptr1);
     free(ptr2);
     free(ptr3);
 	
-	printf("Tests terminés\n");
+	ft_printf("Tests terminés\n");
 	return (0);
 }

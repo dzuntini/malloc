@@ -288,6 +288,7 @@ void *allocate_large(size_t size)
  */
 void *malloc(size_t size)
 {
+	ft_printf("truc bidule chouatte");
 	void *ptr;
 	t_malloc_manager *manager;
 	static char emergency_buffer[1024];
